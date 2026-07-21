@@ -1,0 +1,5 @@
+*.lum
+hcg1_aibox
+*.tmp
+*.bak
+.DS_Store

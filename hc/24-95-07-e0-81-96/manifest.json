@@ -1,0 +1,17 @@
+{
+  "detect": {
+    "version": 1,
+    "url": "/etc/smarthome/detect_model_v2.lum",
+    "sha256": "bd4e51bc48e746cd60f3bd13b2b8ebbc85d7cdb283e391164fe26be7f6e105f8"
+  },
+  "verify": {
+    "version": 1,
+    "url": "/etc/smarthome/verify_model_v2.lum",
+    "sha256": "9f25e18e35b02a7d82900c391a6d7f9cc7ac8f18aad4e6c1abbf340957e797c7"
+  },
+  "config": {
+    "version": 2,
+    "file": "config.json",
+    "sha256": "80ec2994879ee4f87efcff99d371feebab0b2b67a4b74433b32f5e2ea8a62ca1"
+  }
+}
