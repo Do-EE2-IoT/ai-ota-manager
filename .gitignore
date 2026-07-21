@@ -3,4 +3,6 @@
 hcg1_aibox
 *.tmp
 *.bak
+__pycache__/
+*.pyc
 .DS_Store
