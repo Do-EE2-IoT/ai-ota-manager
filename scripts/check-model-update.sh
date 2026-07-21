@@ -10,6 +10,8 @@ HC_CONFIG_FILE="${HC_CONFIG_FILE:-$SMARTHOME_DIR/hc-config.json}"
 MAC_FILE="${MAC_FILE:-$SMARTHOME_DIR/mac_addr.txt}"
 WORK_DIR="${WORK_DIR:-$SMARTHOME_DIR/ota-ai-work}"
 RESTART_AIBOX="${RESTART_AIBOX:-0}"
+DEFAULT_DETECT_PATH="${DEFAULT_DETECT_PATH:-$SMARTHOME_DIR/detect_model_v2.lum}"
+DEFAULT_VERIFY_PATH="${DEFAULT_VERIFY_PATH:-$SMARTHOME_DIR/verify_model_v2.lum}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "This script must run as root" >&2
@@ -47,7 +49,7 @@ update_model_if_needed() {
   name="$1"
   remote_version="$2"
   local_version="$3"
-  target="$4"
+  default_target="$4"
 
   if [ "$remote_version" -le "$local_version" ]; then
     log "$name version $remote_version <= local $local_version, skip"
@@ -55,20 +57,42 @@ update_model_if_needed() {
   fi
 
   url="$(json_get "$name.url" "$MANIFEST_TMP")"
+  target="$(json_get_default "$name.path" "$default_target" "$MANIFEST_TMP")"
   expected_sha="$(json_get "$name.sha256" "$MANIFEST_TMP")"
   tmp="$WORK_DIR/$name.tmp"
-  backup="$target.bak.$(date -u '+%Y%m%d%H%M%S')"
 
-  log "Updating $name model: $local_version -> $remote_version"
+  log "Updating $name model: $local_version -> $remote_version at $target"
   fetch_file "$url" "$tmp"
   verify_sha256 "$tmp" "$expected_sha"
-  cp "$target" "$backup"
   cp "$tmp" "$target"
   changed=1
 }
 
-update_model_if_needed detect "$remote_detect" "$local_detect" "$SMARTHOME_DIR/detect_model_v2.lum"
-update_model_if_needed verify "$remote_verify" "$local_verify" "$SMARTHOME_DIR/verify_model_v2.lum"
+rollback_to_default_models() {
+  log "Rolling back aibox model paths to default models"
+  set_aibox_env_values \
+    "$HC_CONFIG_FILE" \
+    "$WORK_DIR/hc-config.rollback.tmp" \
+    "MODEL_PATH=$DEFAULT_DETECT_PATH" \
+    "VERIFY_MODEL_PATH=$DEFAULT_VERIFY_PATH"
+}
+
+restart_and_check_aibox() {
+  log "Restarting aibox"
+  pkill -f '/usr/bin/aibox' || true
+  for _ in $(seq 1 30); do
+    if pgrep -f '/usr/bin/aibox' >/dev/null 2>&1; then
+      log "aibox is running"
+      return 0
+    fi
+    sleep 1
+  done
+  log "aibox health check failed"
+  return 1
+}
+
+update_model_if_needed detect "$remote_detect" "$local_detect" "$DEFAULT_DETECT_PATH"
+update_model_if_needed verify "$remote_verify" "$local_verify" "$DEFAULT_VERIFY_PATH"
 
 if [ "$remote_config" -gt "$local_config" ]; then
   config_file="$(json_get config.file "$MANIFEST_TMP")"
@@ -76,13 +100,11 @@ if [ "$remote_config" -gt "$local_config" ]; then
   config_src="$CONFIG_BASE/$config_file"
   config_tmp="$WORK_DIR/config.json.tmp"
   merged_tmp="$WORK_DIR/hc-config.json.tmp"
-  backup="$HC_CONFIG_FILE.bak.$(date -u '+%Y%m%d%H%M%S')"
 
   log "Updating config: $local_config -> $remote_config"
   fetch_file "$config_src" "$config_tmp"
   verify_sha256 "$config_tmp" "$expected_config_sha"
   apply_aibox_env_config "$config_tmp" "$HC_CONFIG_FILE" "$merged_tmp"
-  cp "$HC_CONFIG_FILE" "$backup"
   cp "$merged_tmp" "$HC_CONFIG_FILE"
   changed=1
 else
@@ -90,9 +112,12 @@ else
 fi
 
 if [ "$changed" -eq 1 ] && [ "$RESTART_AIBOX" = "1" ]; then
-  log "Restarting aibox"
-  pkill -f '/usr/bin/aibox' || true
-  sleep 2
+  if ! restart_and_check_aibox; then
+    rollback_to_default_models
+    restart_and_check_aibox || true
+    update_ai_info "$AI_INFO_FILE" "$local_detect" "$local_verify" "$local_config" "failed"
+    exit 1
+  fi
 fi
 
 if [ "$changed" -eq 1 ]; then

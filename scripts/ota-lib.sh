@@ -100,6 +100,48 @@ with open(tmp_path, "w", encoding="utf-8") as f:
 PY
 }
 
+set_aibox_env_values() {
+  target_file="$1"
+  tmp_file="$2"
+  shift 2
+
+  python3 - "$target_file" "$tmp_file" "$@" <<'PY'
+import json
+import sys
+
+target_path, tmp_path, *assignments = sys.argv[1:]
+updates = dict(item.split("=", 1) for item in assignments)
+
+with open(target_path, "r", encoding="utf-8") as f:
+    hc_config = json.load(f)
+
+env = hc_config.setdefault("bridge_component", {}).setdefault("aibox", {}).setdefault("env", [])
+next_env = []
+seen = set()
+for item in env:
+    if "=" not in item:
+        next_env.append(item)
+        continue
+    key, value = item.split("=", 1)
+    if key in updates:
+        next_env.append(f"{key}={updates[key]}")
+        seen.add(key)
+    else:
+        next_env.append(item)
+
+for key, value in updates.items():
+    if key not in seen:
+        next_env.append(f"{key}={value}")
+
+hc_config["bridge_component"]["aibox"]["env"] = next_env
+
+with open(tmp_path, "w", encoding="utf-8") as f:
+    json.dump(hc_config, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+PY
+  mv "$tmp_file" "$target_file"
+}
+
 update_ai_info() {
   info_file="$1"
   detect_version="$2"

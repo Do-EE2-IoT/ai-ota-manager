@@ -9,7 +9,7 @@ Repository **không chứa source code của HC** và **không lưu file model `
 - OTA model theo từng HC riêng biệt.
 - Cập nhật được `detect model`, `verify model` và `config`.
 - Không ảnh hưởng HC khác khi chỉ cập nhật một HC cụ thể.
-- Có kiểm tra version, SHA256, backup, rollback và health check.
+- Có kiểm tra version, SHA256, rollback đường dẫn model và health check.
 - Tránh commit model lớn vào Git.
 
 ## Nguyên Tắc Thiết Kế
@@ -20,8 +20,8 @@ Repository **không chứa source code của HC** và **không lưu file model `
 4. Version là căn cứ duy nhất để quyết định có update hay không.
 5. SHA256 chỉ dùng để kiểm tra tính toàn vẹn của file sau khi download hoặc đọc từ repo.
 6. Config OTA dùng file đầy đủ các trường `env` cần quản lý. Khi `config.version` tăng, HC kiểm tra SHA256 rồi apply toàn bộ mảng `env` hợp lệ.
-7. Model được download về file `.tmp`, verify xong mới replace.
-8. Nếu update lỗi, hệ thống rollback về bản trước đó.
+7. Model custom được download về file `.tmp`, verify xong mới đặt vào `/etc/smarthome` với tên riêng, không ghi đè model gốc.
+8. Nếu update lỗi, hệ thống rollback `MODEL_PATH` và `VERIFY_MODEL_PATH` về model gốc.
 
 ## Cấu Trúc Repository
 
@@ -95,11 +95,13 @@ Ví dụ:
   "detect": {
     "version": 3,
     "url": "https://example.com/models/detect_model_v3.lum",
+    "path": "/etc/smarthome/detect_model_v2_custom.lum",
     "sha256": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
   },
   "verify": {
     "version": 2,
     "url": "https://example.com/models/verify_model_v2.lum",
+    "path": "/etc/smarthome/verify_model_v2_custom.lum",
     "sha256": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
   },
   "config": {
@@ -114,9 +116,11 @@ Ví dụ:
 | --- | --- | --- |
 | `detect.version` | Có, nếu OTA detect model | Version của detect model |
 | `detect.url` | Có, nếu OTA detect model | URL tải detect model |
+| `detect.path` | Có, nếu không ghi đè model gốc | Đường dẫn lưu detect model trên HC |
 | `detect.sha256` | Có, nếu OTA detect model | SHA256 của detect model |
 | `verify.version` | Có, nếu OTA verify model | Version của verify model |
 | `verify.url` | Có, nếu OTA verify model | URL tải verify model |
+| `verify.path` | Có, nếu không ghi đè model gốc | Đường dẫn lưu verify model trên HC |
 | `verify.sha256` | Có, nếu OTA verify model | SHA256 của verify model |
 | `config.version` | Có, nếu OTA config | Version của config |
 | `config.file` | Có, nếu OTA config | Tên file config trong cùng thư mục HC |
@@ -162,13 +166,13 @@ Ví dụ:
     "DETECT_TARGET_FPS=3",
     "IOU_RATE=0.8",
     "LD_LIBRARY_PATH=/usr/local/lib/",
-    "MODEL_PATH=/etc/smarthome/detect_model_v2.lum",
+    "MODEL_PATH=/etc/smarthome/detect_model_v2_custom.lum",
     "RECORD_MAIN_STREAM=true",
-    "SCORE_BASE=0.6",
+    "SCORE_BASE=0.7",
     "SCORE_SECURITY=0.8",
     "SCORE_VERIFY=0.5",
     "SECURITY_TIME_WINDOW=2",
-    "VERIFY_MODEL_PATH=/etc/smarthome/verify_model_v2.lum",
+    "VERIFY_MODEL_PATH=/etc/smarthome/verify_model_v2_custom.lum",
     "VLM_ENDPOINT=https://api-vlm-gateway.bizfly.cluster.lumi.biz/v1/runtime/resource/verify-cloud"
   ]
 }
@@ -186,13 +190,13 @@ Ví dụ muốn đổi ngưỡng `SCORE_BASE` từ `0.6` lên `0.7`:
     "DETECT_TARGET_FPS=3",
     "IOU_RATE=0.8",
     "LD_LIBRARY_PATH=/usr/local/lib/",
-    "MODEL_PATH=/etc/smarthome/detect_model_v2.lum",
+    "MODEL_PATH=/etc/smarthome/detect_model_v2_custom.lum",
     "RECORD_MAIN_STREAM=true",
     "SCORE_BASE=0.7",
     "SCORE_SECURITY=0.8",
     "SCORE_VERIFY=0.5",
     "SECURITY_TIME_WINDOW=2",
-    "VERIFY_MODEL_PATH=/etc/smarthome/verify_model_v2.lum",
+    "VERIFY_MODEL_PATH=/etc/smarthome/verify_model_v2_custom.lum",
     "VLM_ENDPOINT=https://api-vlm-gateway.bizfly.cluster.lumi.biz/v1/runtime/resource/verify-cloud"
   ]
 }
@@ -220,7 +224,8 @@ HC sẽ:
 6. Nếu SHA256 hợp lệ, parse `env` và áp dụng các biến môi trường vào cấu hình chạy của HC.
 7. Restart service hoặc AIBOX nếu cần.
 8. Health check.
-9. Chỉ cập nhật local version khi health check pass.
+9. Nếu health check pass, cập nhật local version.
+10. Nếu health check fail, đổi `MODEL_PATH` và `VERIFY_MODEL_PATH` về model gốc rồi restart lại.
 
 ## Local Version Trên HC
 
@@ -246,16 +251,34 @@ File này là dữ liệu duy nhất dùng để so sánh version với manifest
 
 ## Model Storage
 
-Không lưu file `.lum` trong Git repository.
+Model custom được lưu trong Git repository tại thư mục:
 
-Nên lưu model ở một trong các nơi sau:
+```text
+model/
+```
 
-- GitHub Release Asset
-- S3-compatible object storage
-- Server nội bộ có HTTPS
-- CDN hoặc artifact storage riêng
+Ví dụ:
 
-Manifest chỉ lưu URL download và SHA256.
+```text
+model/detect_model_v2_custom.lum
+model/verify_model_v2_custom.lum
+```
+
+HC download model custom về:
+
+```text
+/etc/smarthome/detect_model_v2_custom.lum
+/etc/smarthome/verify_model_v2_custom.lum
+```
+
+Không ghi đè model gốc:
+
+```text
+/etc/smarthome/detect_model_v2.lum
+/etc/smarthome/verify_model_v2.lum
+```
+
+Manifest lưu URL raw GitHub, đường dẫn đích trên HC và SHA256.
 
 Ví dụ:
 
@@ -302,9 +325,7 @@ Kiểm tra SHA256
   ↓
 Kiểm tra model có thể load nếu update model
   ↓
-Backup file cũ
-  ↓
-Replace file mới hoặc apply config mới
+Ghi model custom vào path riêng hoặc apply config mới
   ↓
 Restart service hoặc AIBOX
   ↓
@@ -316,7 +337,7 @@ Cập nhật ota_ai_info.json
   ↓
 Nếu FAIL
   ↓
-Rollback
+Rollback MODEL_PATH và VERIFY_MODEL_PATH về model gốc
 ```
 
 ## Script OTA
@@ -347,8 +368,7 @@ Nên chứa các nhóm hàm:
 - Download file
 - Verify SHA256
 - Validate manifest
-- Backup file cũ
-- Replace file
+- Ghi model custom vào path riêng
 - Apply config
 - Restart service
 - Health check
@@ -496,13 +516,17 @@ Cập nhật này không ảnh hưởng bất kỳ HC nào khác vì mỗi HC ch
 
 ## Cron Trên HC
 
-Khuyến nghị chạy kiểm tra OTA mỗi 30 phút.
+Production hiện tại chạy kiểm tra OTA mỗi 5 phút.
 
 ```cron
-*/30 * * * * /opt/smarthome/model-ota/scripts/check-model-update.sh >> /var/log/model-ota.log 2>&1
+*/5 * * * * OTA_BASE_URL=https://raw.githubusercontent.com/Do-EE2-IoT/ai-ota-manager/main RESTART_AIBOX=1 /etc/smarthome/ai-ota-manager/scripts/check-model-update.sh >> /var/log/ai-ota-manager.log 2>&1
 ```
 
-Đường dẫn script thực tế có thể thay đổi theo cách deploy trên HC.
+Script production đặt trên HC tại:
+
+```text
+/etc/smarthome/ai-ota-manager/scripts/check-model-update.sh
+```
 
 ## Chiến Lược Commit
 
@@ -522,7 +546,7 @@ Không nên commit nhiều thay đổi lớn không liên quan trong cùng một
 
 ## Push Lên GitHub
 
-Khuyến nghị dùng private repository.
+Repository hiện dùng public GitHub raw để HC tải manifest, config và model.
 
 ```bash
 git remote add origin <git-url>
@@ -530,13 +554,11 @@ git branch -M main
 git push -u origin main
 ```
 
-Repository chỉ nên cấp quyền read cho HC.
-
-Nếu HC cần pull trực tiếp từ GitHub, nên dùng deploy key hoặc token có quyền tối thiểu.
+Nếu chuyển repository về private, HC cần token hoặc deploy key có quyền read.
 
 ## Checklist Trước Khi OTA Model Thật
 
-- [ ] Repository không chứa file `.lum` trong Git history.
+- [ ] Model custom nằm trong thư mục `model/`.
 - [ ] Manifest JSON hợp lệ.
 - [ ] URL model tải được từ HC.
 - [ ] SHA256 trong manifest khớp với file model.
@@ -545,9 +567,9 @@ Nếu HC cần pull trực tiếp từ GitHub, nên dùng deploy key hoặc toke
 - [ ] Local version trên HC đọc được.
 - [ ] Script xử lý đúng trường hợp manifest `404`.
 - [ ] Script bỏ qua update khi remote version không lớn hơn local version.
-- [ ] File được download hoặc đọc về `.tmp` trước khi replace.
-- [ ] Có backup trước khi replace.
-- [ ] Có rollback khi health check fail.
+- [ ] File được download hoặc đọc về `.tmp` trước khi apply.
+- [ ] Model custom được ghi vào path riêng, không ghi đè model gốc.
+- [ ] Có rollback đường dẫn model về model gốc khi health check fail.
 - [ ] Config được apply đúng các biến trong `env`.
 - [ ] Log OTA đủ để debug.
 - [ ] Đã test bằng file giả lập trước khi dùng model thật.
@@ -567,12 +589,12 @@ Nếu HC cần pull trực tiếp từ GitHub, nên dùng deploy key hoặc toke
 
 ## Quy Tắc An Toàn
 
-- Không commit model `.lum`.
+- Chỉ commit model `.lum` trong thư mục `model/`.
 - Không sửa manifest bằng tay nếu đã có tool `create-manifest.py`.
 - Không giảm version sau khi đã phát hành.
 - Không dùng cùng một version cho hai nội dung model khác nhau.
 - Không update local version nếu health check chưa pass.
-- Không xóa backup trước khi xác nhận bản mới chạy ổn định.
+- Không ghi đè model gốc trong `/etc/smarthome`.
 - Không apply config nếu SHA256 không khớp.
 - Không để thiếu biến bắt buộc trong `env`.
 
