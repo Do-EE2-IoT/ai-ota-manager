@@ -160,7 +160,6 @@ Ví dụ:
 
 ```json
 {
-  "config_version": 5,
   "env": [
     "DETECT_MAIN_STREAM=false",
     "DETECT_TARGET_FPS=3",
