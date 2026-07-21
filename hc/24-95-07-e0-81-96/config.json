@@ -1,5 +1,5 @@
 {
-  "config_version": 2,
+  "config_version": 3,
   "env": [
     "DETECT_MAIN_STREAM=false",
     "DETECT_TARGET_FPS=3",
@@ -7,7 +7,7 @@
     "LD_LIBRARY_PATH=/usr/local/lib/",
     "MODEL_PATH=/etc/smarthome/detect_model_v2.lum",
     "RECORD_MAIN_STREAM=true",
-    "SCORE_BASE=0.6",
+    "SCORE_BASE=0.65",
     "SCORE_SECURITY=0.8",
     "SCORE_VERIFY=0.5",
     "SECURITY_TIME_WINDOW=2",

@@ -1,4 +1,5 @@
 *.lum
+!model/*.lum
 hcg1_aibox
 *.tmp
 *.bak
