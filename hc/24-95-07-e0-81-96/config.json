@@ -1,5 +1,4 @@
 {
-  "config_version": 4,
   "env": [
     "DETECT_MAIN_STREAM=false",
     "DETECT_TARGET_FPS=5",
