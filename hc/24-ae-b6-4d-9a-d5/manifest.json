@@ -1,9 +1,9 @@
 {
   "detect": {
     "version": 1,
-    "url": "https://raw.githubusercontent.com/Do-EE2-IoT/ai-ota-manager/main/model/verify_model_v2_4d9ad5.lum",
-    "path": "/etc/smarthome/verify_model_v2_4d9ad5.lum",
-    "sha256": "8a735c40a6008273ab9cbab7d578cd7746b6a2d7cd9b6cbb057b59b238a5b0de"
+    "url": "https://raw.githubusercontent.com/Do-EE2-IoT/ai-ota-manager/main/model/detect_model_v2.lum",
+    "path": "/etc/smarthome/detect_model_v2.lum",
+    "sha256": "bd4e51bc48e746cd60f3bd13b2b8ebbc85d7cdb283e391164fe26be7f6e105f8"
   },
   "verify": {
     "version": 2,
@@ -12,8 +12,8 @@
     "sha256": "8a735c40a6008273ab9cbab7d578cd7746b6a2d7cd9b6cbb057b59b238a5b0de"
   },
   "config": {
-    "version": 3,
+    "version": 4,
     "file": "config.json",
-    "sha256": "f16acbc5c4a42753c7bff31d9b2aac449da52b03fdbff9164112833000ec36e2"
+    "sha256": "5e383b6a429aae2bae21071e10ddefc162360d8051859bb0f2f1eb05f2cd7734"
   }
 }

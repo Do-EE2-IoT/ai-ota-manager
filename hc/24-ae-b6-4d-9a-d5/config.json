@@ -4,7 +4,7 @@
     "DETECT_TARGET_FPS=3",
     "IOU_RATE=0.8",
     "LD_LIBRARY_PATH=/usr/local/lib/",
-    "MODEL_PATH=/etc/smarthome/verify_model_v2_4d9ad5.lum",
+    "MODEL_PATH=/etc/smarthome/detect_model_v2.lum",
     "RECORD_MAIN_STREAM=true",
     "SCORE_BASE=0.8",
     "SCORE_SECURITY=0.9",
