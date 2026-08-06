@@ -12,8 +12,8 @@
     "sha256": "872c7cafd1531b73da7d9e74be370b0795eb1f6cce0577c01dbe33da848351f8"
   },
   "config": {
-    "version": 3,
+    "version": 5,
     "file": "config.json",
-    "sha256": "abebfde0713e4b22be4c9b3642b41437a4c9e7191dd6156a3b5d0990fa324885"
+    "sha256": "830b4c8d03b2f6ca71b260f3494f678c6ea3110ab5b7e34ef39b93400a9951d9"
   }
 }

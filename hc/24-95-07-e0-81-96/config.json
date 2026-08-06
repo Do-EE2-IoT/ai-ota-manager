@@ -7,7 +7,7 @@
     "MODEL_PATH=/etc/smarthome/detect_model_v2.lum",
     "RECORD_MAIN_STREAM=true",
     "SCORE_BASE=0.5",
-    "SCORE_SECURITY=0.5",
+    "SCORE_SECURITY=0.7",
     "SCORE_VERIFY=0.6",
     "SECURITY_TIME_WINDOW=3",
     "VERIFY_MODEL_PATH=/etc/smarthome/verify_model_v2.lum",
