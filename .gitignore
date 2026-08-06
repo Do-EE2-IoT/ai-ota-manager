@@ -3,6 +3,7 @@
 hcg1_aibox
 *.tmp
 *.bak
+.ota-publish-auth.json
 __pycache__/
 *.pyc
 .DS_Store
