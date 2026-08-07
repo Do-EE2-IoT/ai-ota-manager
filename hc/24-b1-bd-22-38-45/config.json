@@ -1,0 +1,16 @@
+{
+  "env": [
+    "DETECT_MAIN_STREAM=false",
+    "DETECT_TARGET_FPS=3",
+    "IOU_RATE=0.8",
+    "LD_LIBRARY_PATH=/usr/local/lib/",
+    "MODEL_PATH=/etc/smarthome/detect_model_v2.lum",
+    "RECORD_MAIN_STREAM=true",
+    "SCORE_BASE=0.8",
+    "SCORE_SECURITY=0.9",
+    "SCORE_VERIFY=0.7",
+    "SECURITY_TIME_WINDOW=3",
+    "VERIFY_MODEL_PATH=/etc/smarthome/verify_model_v2.lum",
+    "VLM_ENDPOINT=https://api-vlm-gateway.bizfly.cluster.lumi.biz/v1/runtime/resource/verify-cloud"
+  ]
+}
