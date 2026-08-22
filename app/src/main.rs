@@ -12,6 +12,7 @@ const LISTEN_ADDR: &str = "127.0.0.1:8787";
 const PUBLISH_AUTH_FILE: &str = ".ota-publish-auth.json";
 const DEFAULT_DETECT_MODEL_PATH: &str = "/etc/smarthome/detect_model_v2.lum";
 const DEFAULT_VERIFY_MODEL_PATH: &str = "/etc/smarthome/verify_model_v2.lum";
+const DEFAULT_LUMI_LIFE_CONFIG_ENDPOINT: &str = "https://lumilife-config.bizfly.cluster.lumi.biz";
 const DEFAULT_DETECT_TARGET_FPS: &str = "3";
 const DEFAULT_SCORE_BASE: &str = "0.8";
 const DEFAULT_SCORE_SECURITY: &str = "0.9";
@@ -785,6 +786,7 @@ fn config_env(
         format!("DETECT_TARGET_FPS={detect_target_fps}"),
         "IOU_RATE=0.8".to_string(),
         "LD_LIBRARY_PATH=/usr/local/lib/".to_string(),
+        format!("LUMI_LIFE_CONFIG_ENDPOINT={DEFAULT_LUMI_LIFE_CONFIG_ENDPOINT}"),
         format!("MODEL_PATH={DEFAULT_DETECT_MODEL_PATH}"),
         "RECORD_MAIN_STREAM=true".to_string(),
         format!("SCORE_BASE={score_base}"),
@@ -974,7 +976,6 @@ const HTML: &str = r#"<!doctype html>
     .hidden { display: none; }
     table { width: 100%; border-collapse: collapse; }
     th, td { padding: 10px; border-bottom: 1px solid #e5e9ee; text-align: left; }
-    pre { white-space: pre-wrap; background: #0f1720; color: #e8edf3; padding: 12px; border-radius: 6px; min-height: 180px; overflow: auto; }
     @media (max-width: 1100px) { .settings { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     @media (max-width: 900px) { main { grid-template-columns: 1fr; } .row, .settings { grid-template-columns: 1fr; } }
   </style>
@@ -1047,11 +1048,10 @@ const HTML: &str = r#"<!doctype html>
           <label>Commit message<input id="commit-message" value="Update AI OTA data"></label>
         </div>
         <div class="actions">
-          <button onclick="validateRepo()">Kiểm tra</button>
           <button class="primary" onclick="publishRepo()">Xuất bản</button>
         </div>
         <p class="muted">App đọc Git username/token từ .ota-publish-auth.json. Xuất bản sẽ chạy: git add, git commit, git pull --rebase, git push origin main.</p>
-        <pre id="validate-output"></pre>
+        <div id="publish-result" class="notice"></div>
       </div>
     </section>
   </main>
@@ -1200,27 +1200,16 @@ const HTML: &str = r#"<!doctype html>
       } catch (e) { setStatus(e.message); }
     }
 
-    async function validateRepo() {
-      try {
-        const msg = await api("/api/validate", {});
-        $("validate-output").textContent = msg;
-        setStatus("Kiểm tra OK");
-      } catch (e) {
-        $("validate-output").textContent = e.message;
-        setStatus(e.message);
-      }
-    }
-
     async function publishRepo() {
       if (!confirm("Xác nhận xuất bản lên GitHub?")) return;
       try {
         const msg = await api("/api/publish", {
           message: $("commit-message").value
         });
-        $("validate-output").textContent = msg;
+        $("publish-result").textContent = msg;
         setStatus(msg);
       } catch (e) {
-        $("validate-output").textContent = e.message;
+        $("publish-result").textContent = e.message;
         setStatus(e.message);
       }
     }
