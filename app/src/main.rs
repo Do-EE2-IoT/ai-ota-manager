@@ -754,8 +754,12 @@ fn build_config_env(req: &SaveHcRequest) -> Result<Vec<String>, String> {
     let score_verify = validate_score("SCORE_VERIFY", &req.score_verify)?;
     let security_time_window =
         validate_positive_integer("SECURITY_TIME_WINDOW", &req.security_time_window)?;
+    let detect_model_path = format!("{HC_MODEL_BASE}{}", req.detect_model.trim());
+    let verify_model_path = format!("{HC_MODEL_BASE}{}", req.verify_model.trim());
 
     Ok(config_env(
+        &detect_model_path,
+        &verify_model_path,
         &detect_target_fps,
         &score_base,
         &score_security,
@@ -766,6 +770,8 @@ fn build_config_env(req: &SaveHcRequest) -> Result<Vec<String>, String> {
 
 fn default_config_env() -> Vec<String> {
     config_env(
+        DEFAULT_DETECT_MODEL_PATH,
+        DEFAULT_VERIFY_MODEL_PATH,
         DEFAULT_DETECT_TARGET_FPS,
         DEFAULT_SCORE_BASE,
         DEFAULT_SCORE_SECURITY,
@@ -775,6 +781,8 @@ fn default_config_env() -> Vec<String> {
 }
 
 fn config_env(
+    detect_model_path: &str,
+    verify_model_path: &str,
     detect_target_fps: &str,
     score_base: &str,
     score_security: &str,
@@ -787,13 +795,13 @@ fn config_env(
         "IOU_RATE=0.8".to_string(),
         "LD_LIBRARY_PATH=/usr/local/lib/".to_string(),
         format!("LUMI_LIFE_CONFIG_ENDPOINT={DEFAULT_LUMI_LIFE_CONFIG_ENDPOINT}"),
-        format!("MODEL_PATH={DEFAULT_DETECT_MODEL_PATH}"),
+        format!("MODEL_PATH={detect_model_path}"),
         "RECORD_MAIN_STREAM=true".to_string(),
         format!("SCORE_BASE={score_base}"),
         format!("SCORE_SECURITY={score_security}"),
         format!("SCORE_VERIFY={score_verify}"),
         format!("SECURITY_TIME_WINDOW={security_time_window}"),
-        format!("VERIFY_MODEL_PATH={DEFAULT_VERIFY_MODEL_PATH}"),
+        format!("VERIFY_MODEL_PATH={verify_model_path}"),
         "VLM_ENDPOINT=https://api-vlm-gateway.bizfly.cluster.lumi.biz/v1/runtime/resource/verify-cloud"
             .to_string(),
     ]
