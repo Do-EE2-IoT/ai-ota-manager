@@ -9,8 +9,8 @@
     "SCORE_BASE=0.8",
     "SCORE_SECURITY=0.9",
     "SCORE_VERIFY=0.5",
-    "SECURITY_TIME_WINDOW=5",
-    "VERIFY_MODEL_PATH=/etc/smarthome/verify_model_v3_888bd9.lum",
+    "SECURITY_TIME_WINDOW=3",
+    "VERIFY_MODEL_PATH=/etc/smarthome/verify_model_v2.lum",
     "VLM_ENDPOINT=https://api-vlm-gateway.bizfly.cluster.lumi.biz/v1/runtime/resource/verify-cloud"
   ]
 }
