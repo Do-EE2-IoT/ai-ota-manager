@@ -6,13 +6,13 @@
     "sha256": "bd4e51bc48e746cd60f3bd13b2b8ebbc85d7cdb283e391164fe26be7f6e105f8"
   },
   "verify": {
-    "version": 4,
+    "version": 6,
     "url": "https://raw.githubusercontent.com/Do-EE2-IoT/ai-ota-manager/main/model/verify_model_240826.lum",
     "path": "/etc/smarthome/verify_model_240826.lum",
     "sha256": "ad1805ae3ed7fec895439be461ccff878d39987543ceba6975e2c8b51e2e73f1"
   },
   "config": {
-    "version": 4,
+    "version": 6,
     "file": "config.json",
     "sha256": "f9c0f0d2125443be27903ec5ace7960dc8294598e6d4f2564c7ca1690f97cd9d"
   }
