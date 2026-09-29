@@ -393,4 +393,5 @@ ls -lh /etc/smarthome/*custom.lum
 - [ ] Commit và push.
 - [ ] Chờ cron tự chạy.
 - [ ] Xem log `/var/log/ai-ota-manager.log`.
+- 
 
