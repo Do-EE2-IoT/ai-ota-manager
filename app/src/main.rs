@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -131,6 +132,59 @@ struct PublishRequest {
     message: String,
 }
 
+#[derive(Deserialize)]
+struct BulkUpdateRequest {
+    macs: Vec<String>,
+    detect_model: String,
+    verify_model: String,
+    detect_target_fps: String,
+    score_base: String,
+    score_security: String,
+    score_verify: String,
+    security_time_window: String,
+}
+
+#[derive(Serialize)]
+struct BulkPreviewItem {
+    mac: String,
+    dir: String,
+    existing: bool,
+    current_detect_model: String,
+    current_verify_model: String,
+    current_detect_version: u64,
+    next_detect_version: u64,
+    current_verify_version: u64,
+    next_verify_version: u64,
+    current_config_version: u64,
+    next_config_version: u64,
+}
+
+#[derive(Serialize)]
+struct BulkUpdateSummary {
+    message: String,
+    updated: usize,
+    created: usize,
+    items: Vec<BulkPreviewItem>,
+}
+
+struct BulkHcPlan {
+    dir: String,
+    mac: String,
+    existing: bool,
+    current_detect_model: String,
+    current_verify_model: String,
+    current_detect_version: u64,
+    next_detect_version: u64,
+    current_verify_version: u64,
+    next_verify_version: u64,
+    current_config_version: u64,
+    next_config_version: u64,
+    detect_model: String,
+    verify_model: String,
+    config_file: String,
+    config: ConfigFile,
+}
+
 #[derive(Default, Deserialize)]
 struct PublishAuthFile {
     #[serde(default, alias = "username")]
@@ -207,6 +261,14 @@ fn route_request(
         ("POST", "/api/hc/delete") => {
             let req: DirRequest = json_body(body)?;
             respond_json_result(stream, delete_hc(repo_root, &req.dir))
+        }
+        ("POST", "/api/hc/bulk-preview") => {
+            let req: BulkUpdateRequest = json_body(body)?;
+            respond_json_result(stream, bulk_preview(repo_root, req))
+        }
+        ("POST", "/api/hc/bulk-update") => {
+            let req: BulkUpdateRequest = json_body(body)?;
+            respond_json_result(stream, bulk_update(repo_root, req))
         }
         ("POST", "/api/model/upload") => {
             respond_json_result(stream, upload_model(repo_root, headers, body))
@@ -337,6 +399,187 @@ fn save_hc(repo_root: &Path, req: SaveHcRequest) -> Result<String, String> {
     Ok(format!(
         "Đã lưu HC {dir}. Version hiện tại: detect={detect_version}, verify={verify_version}, config={config_version}."
     ))
+}
+
+fn bulk_preview(repo_root: &Path, req: BulkUpdateRequest) -> Result<Vec<BulkPreviewItem>, String> {
+    let plans = build_bulk_plans(repo_root, &req)?;
+    Ok(plans.iter().map(BulkHcPlan::preview).collect())
+}
+
+fn bulk_update(repo_root: &Path, req: BulkUpdateRequest) -> Result<BulkUpdateSummary, String> {
+    let plans = build_bulk_plans(repo_root, &req)?;
+    let updated = plans.iter().filter(|plan| plan.existing).count();
+    let created = plans.len() - updated;
+    let items = plans.iter().map(BulkHcPlan::preview).collect::<Vec<_>>();
+
+    for plan in &plans {
+        let hc_dir = repo_root.join("hc").join(&plan.dir);
+        fs::create_dir_all(&hc_dir)
+            .map_err(|e| format!("Không tạo được thư mục HC {}: {e}", plan.dir))?;
+
+        write_json(&hc_dir.join("config.json"), &plan.config)?;
+        write_json(
+            &hc_dir.join("manifest.json"),
+            &ManifestFile {
+                detect: ManifestModel {
+                    version: plan.next_detect_version,
+                    url: format!("{RAW_MODEL_BASE}{}", plan.detect_model),
+                    path: format!("{HC_MODEL_BASE}{}", plan.detect_model),
+                    sha256: String::new(),
+                },
+                verify: ManifestModel {
+                    version: plan.next_verify_version,
+                    url: format!("{RAW_MODEL_BASE}{}", plan.verify_model),
+                    path: format!("{HC_MODEL_BASE}{}", plan.verify_model),
+                    sha256: String::new(),
+                },
+                config: ManifestConfig {
+                    version: plan.next_config_version,
+                    file: plan.config_file.clone(),
+                    sha256: String::new(),
+                },
+            },
+        )?;
+    }
+
+    for plan in &plans {
+        run_checked(
+            Command::new("python3")
+                .arg("tools/refresh-manifest-sha.py")
+                .arg(format!("hc/{}", plan.dir))
+                .current_dir(repo_root),
+        )?;
+    }
+
+    validate(repo_root)?;
+    Ok(BulkUpdateSummary {
+        message: format!("Đã cập nhật {updated} HC và tạo mới {created} HC."),
+        updated,
+        created,
+        items,
+    })
+}
+
+fn build_bulk_plans(repo_root: &Path, req: &BulkUpdateRequest) -> Result<Vec<BulkHcPlan>, String> {
+    let detect_model = req.detect_model.trim();
+    let verify_model = req.verify_model.trim();
+    if detect_model.is_empty() || verify_model.is_empty() {
+        return Err("Cần chọn cả model detect và model verify.".to_string());
+    }
+    ensure_model_name(detect_model)?;
+    ensure_model_name(verify_model)?;
+    ensure_model_exists(repo_root, detect_model)?;
+    ensure_model_exists(repo_root, verify_model)?;
+    let common_env = build_config_env_values(
+        detect_model,
+        verify_model,
+        &req.detect_target_fps,
+        &req.score_base,
+        &req.score_security,
+        &req.score_verify,
+        &req.security_time_window,
+    )?;
+    if req.macs.is_empty() {
+        return Err("Cần nhập ít nhất một MAC.".to_string());
+    }
+
+    let mut seen = HashSet::new();
+    let mut plans = Vec::with_capacity(req.macs.len());
+    for raw_mac in &req.macs {
+        let dir = mac_to_dir(raw_mac)?;
+        if !seen.insert(dir.clone()) {
+            return Err(format!(
+                "MAC bị trùng trong danh sách: {}",
+                dir_to_mac(&dir)
+            ));
+        }
+
+        let hc_dir = repo_root.join("hc").join(&dir);
+        let manifest_path = hc_dir.join("manifest.json");
+        let config_path = hc_dir.join("config.json");
+        let existing = hc_dir.exists();
+
+        if existing {
+            let manifest: ManifestFile = read_json(&manifest_path)?;
+            let previous_config: ConfigFile = read_json(&config_path)?;
+            let config_version =
+                next_config_version(Some(&manifest), Some(&previous_config), &common_env);
+
+            plans.push(BulkHcPlan {
+                dir: dir.clone(),
+                mac: dir_to_mac(&dir),
+                existing: true,
+                current_detect_model: filename_from_url_or_path(
+                    &manifest.detect.url,
+                    &manifest.detect.path,
+                ),
+                current_verify_model: filename_from_url_or_path(
+                    &manifest.verify.url,
+                    &manifest.verify.path,
+                ),
+                current_detect_version: manifest.detect.version.max(1),
+                next_detect_version: manifest.detect.version.max(1).saturating_add(1),
+                current_verify_version: manifest.verify.version.max(1),
+                next_verify_version: manifest.verify.version.max(1).saturating_add(1),
+                current_config_version: manifest.config.version.max(1),
+                next_config_version: config_version,
+                detect_model: detect_model.to_string(),
+                verify_model: verify_model.to_string(),
+                config_file: if manifest.config.file.trim().is_empty() {
+                    "config.json".to_string()
+                } else {
+                    manifest.config.file
+                },
+                config: ConfigFile {
+                    env: common_env.clone(),
+                },
+            });
+        } else {
+            let config = ConfigFile {
+                env: common_env.clone(),
+            };
+            let detect_version = next_model_version(None, "detect", detect_model);
+            let verify_version = next_model_version(None, "verify", verify_model);
+            let config_version = next_config_version(None, None, &config.env);
+
+            plans.push(BulkHcPlan {
+                dir: dir.clone(),
+                mac: dir_to_mac(&dir),
+                existing: false,
+                current_detect_model: String::new(),
+                current_verify_model: String::new(),
+                current_detect_version: 0,
+                next_detect_version: detect_version,
+                current_verify_version: 0,
+                next_verify_version: verify_version,
+                current_config_version: 0,
+                next_config_version: config_version,
+                detect_model: detect_model.to_string(),
+                verify_model: verify_model.to_string(),
+                config_file: "config.json".to_string(),
+                config,
+            });
+        }
+    }
+    Ok(plans)
+}
+
+impl BulkHcPlan {
+    fn preview(&self) -> BulkPreviewItem {
+        BulkPreviewItem {
+            mac: self.mac.clone(),
+            dir: self.dir.clone(),
+            existing: self.existing,
+            current_detect_model: self.current_detect_model.clone(),
+            current_verify_model: self.current_verify_model.clone(),
+            current_detect_version: self.current_detect_version,
+            next_detect_version: self.next_detect_version,
+            current_verify_version: self.current_verify_version,
+            next_verify_version: self.next_verify_version,
+            current_config_version: self.current_config_version,
+            next_config_version: self.next_config_version,
+        }
+    }
 }
 
 fn delete_hc(repo_root: &Path, dir: &str) -> Result<String, String> {
@@ -748,14 +991,34 @@ fn env_value(env: &[(&str, &str)], key: &str, default: &str) -> String {
 }
 
 fn build_config_env(req: &SaveHcRequest) -> Result<Vec<String>, String> {
-    let detect_target_fps = validate_positive_integer("DETECT_TARGET_FPS", &req.detect_target_fps)?;
-    let score_base = validate_score("SCORE_BASE", &req.score_base)?;
-    let score_security = validate_score("SCORE_SECURITY", &req.score_security)?;
-    let score_verify = validate_score("SCORE_VERIFY", &req.score_verify)?;
+    build_config_env_values(
+        &req.detect_model,
+        &req.verify_model,
+        &req.detect_target_fps,
+        &req.score_base,
+        &req.score_security,
+        &req.score_verify,
+        &req.security_time_window,
+    )
+}
+
+fn build_config_env_values(
+    detect_model: &str,
+    verify_model: &str,
+    detect_target_fps: &str,
+    score_base: &str,
+    score_security: &str,
+    score_verify: &str,
+    security_time_window: &str,
+) -> Result<Vec<String>, String> {
+    let detect_target_fps = validate_positive_integer("DETECT_TARGET_FPS", detect_target_fps)?;
+    let score_base = validate_score("SCORE_BASE", score_base)?;
+    let score_security = validate_score("SCORE_SECURITY", score_security)?;
+    let score_verify = validate_score("SCORE_VERIFY", score_verify)?;
     let security_time_window =
-        validate_positive_integer("SECURITY_TIME_WINDOW", &req.security_time_window)?;
-    let detect_model_path = format!("{HC_MODEL_BASE}{}", req.detect_model.trim());
-    let verify_model_path = format!("{HC_MODEL_BASE}{}", req.verify_model.trim());
+        validate_positive_integer("SECURITY_TIME_WINDOW", security_time_window)?;
+    let detect_model_path = format!("{HC_MODEL_BASE}{}", detect_model.trim());
+    let verify_model_path = format!("{HC_MODEL_BASE}{}", verify_model.trim());
 
     Ok(config_env(
         &detect_model_path,
@@ -978,6 +1241,9 @@ const HTML: &str = r#"<!doctype html>
     .sidebar-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 14px; }
     .sidebar-head h2 { margin: 0; }
     .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .bulk-list { display: grid; gap: 8px; max-width: 760px; }
+    .bulk-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+    .bulk-preview { min-height: 100px; margin: 0; padding: 12px; overflow: auto; background: #f5f7f9; border: 1px solid #e5e9ee; border-radius: 6px; white-space: pre-wrap; font-family: "Ubuntu Mono", "DejaVu Sans Mono", Consolas, monospace; }
     .muted { color: #647282; font-size: 14px; }
     .notice { min-height: 22px; color: #17603a; font-weight: 600; }
     .status { position: sticky; bottom: 0; padding: 10px 18px; background: #17212b; color: white; min-height: 40px; }
@@ -993,6 +1259,7 @@ const HTML: &str = r#"<!doctype html>
     <h1>AI OTA Manager</h1>
     <nav>
       <button id="tab-hc" class="active" onclick="showTab('hc')">HC</button>
+      <button id="tab-bulk" onclick="showTab('bulk')">Update hàng loạt</button>
       <button id="tab-model" onclick="showTab('model')">Model</button>
       <button id="tab-publish" onclick="showTab('publish')">Xuất bản</button>
     </nav>
@@ -1028,6 +1295,36 @@ const HTML: &str = r#"<!doctype html>
           <button class="danger" onclick="deleteHc()">Xóa HC</button>
         </div>
         <div id="save-result" class="notice"></div>
+      </div>
+    </section>
+  </main>
+
+  <main id="view-bulk" class="hidden">
+    <section style="grid-column: 1 / -1">
+      <h2>Update model hàng loạt</h2>
+      <div class="form">
+        <div class="row">
+          <label><span>Model detect mới</span><select id="bulk-detect-model"></select></label>
+          <label><span>Model verify mới</span><select id="bulk-verify-model"></select></label>
+        </div>
+        <div class="section-title">Cấu hình chung áp dụng cho toàn bộ MAC</div>
+        <div class="settings">
+          <label><span>DETECT_TARGET_FPS</span><input id="bulk-detect-target-fps" type="number" min="1" step="1" value="3"></label>
+          <label><span>SCORE_BASE</span><input id="bulk-score-base" type="number" min="0" max="1" step="0.01" value="0.8"></label>
+          <label><span>SCORE_SECURITY</span><input id="bulk-score-security" type="number" min="0" max="1" step="0.01" value="0.9"></label>
+          <label><span>SCORE_VERIFY</span><input id="bulk-score-verify" type="number" min="0" max="1" step="0.01" value="0.5"></label>
+          <label><span>SECURITY_TIME_WINDOW</span><input id="bulk-security-time-window" type="number" min="1" step="1" value="2"></label>
+        </div>
+        <div class="section-title">Danh sách MAC</div>
+        <p class="muted">Mỗi dòng nhập một MAC. Model và bộ cấu hình trên sẽ được áp dụng chung cho toàn bộ danh sách.</p>
+        <div id="bulk-mac-list" class="bulk-list"></div>
+        <div class="actions">
+          <button onclick="addBulkMac()">+ Thêm MAC</button>
+          <button onclick="previewBulk()">Kiểm tra danh sách</button>
+          <button class="primary" onclick="updateBulk()">Update toàn bộ</button>
+        </div>
+        <pre id="bulk-preview" class="bulk-preview">Chưa kiểm tra danh sách.</pre>
+        <div id="bulk-result" class="notice"></div>
       </div>
     </section>
   </main>
@@ -1069,6 +1366,7 @@ const HTML: &str = r#"<!doctype html>
   <script>
     let state = { hcs: [], models: [] };
     let currentDir = "";
+    let bulkMacs = [""];
 
     function $(id) { return document.getElementById(id); }
     function setStatus(text) { $("status").textContent = text || ""; }
@@ -1085,7 +1383,7 @@ const HTML: &str = r#"<!doctype html>
     }
 
     function showTab(tab) {
-      for (const name of ["hc", "model", "publish"]) {
+      for (const name of ["hc", "bulk", "model", "publish"]) {
         $("view-" + name).classList.toggle("hidden", name !== tab);
         $("tab-" + name).classList.toggle("active", name === tab);
       }
@@ -1098,6 +1396,7 @@ const HTML: &str = r#"<!doctype html>
         renderHcs();
         renderModels();
         renderModelSelects();
+        renderBulkMacs();
         setStatus("Sẵn sàng");
       } catch (e) { setStatus(e.message); }
     }
@@ -1111,10 +1410,92 @@ const HTML: &str = r#"<!doctype html>
     }
 
     function renderModelSelects() {
-      for (const id of ["detect-model", "verify-model"]) {
+      for (const id of ["detect-model", "verify-model", "bulk-detect-model", "bulk-verify-model"]) {
         const current = $(id).value;
         $(id).innerHTML = modelNames().map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join("");
         if (modelNames().includes(current)) $(id).value = current;
+      }
+    }
+
+    function renderBulkMacs() {
+      $("bulk-mac-list").innerHTML = bulkMacs.map((mac, index) => `
+        <div class="bulk-row">
+          <input value="${esc(mac)}" placeholder="24:95:07:e0:81:96" oninput="bulkMacs[${index}] = this.value">
+          <button class="danger" onclick="removeBulkMac(${index})">Xóa</button>
+        </div>
+      `).join("");
+    }
+
+    function addBulkMac() {
+      bulkMacs.push("");
+      renderBulkMacs();
+      const inputs = $("bulk-mac-list").querySelectorAll("input");
+      inputs[inputs.length - 1]?.focus();
+    }
+
+    function removeBulkMac(index) {
+      if (bulkMacs.length === 1) {
+        bulkMacs[0] = "";
+      } else {
+        bulkMacs.splice(index, 1);
+      }
+      renderBulkMacs();
+    }
+
+    function bulkRequest() {
+      return {
+        macs: bulkMacs.map(mac => mac.trim()).filter(Boolean),
+        detect_model: $("bulk-detect-model").value,
+        verify_model: $("bulk-verify-model").value,
+        detect_target_fps: $("bulk-detect-target-fps").value,
+        score_base: $("bulk-score-base").value,
+        score_security: $("bulk-score-security").value,
+        score_verify: $("bulk-score-verify").value,
+        security_time_window: $("bulk-security-time-window").value
+      };
+    }
+
+    function formatBulkPreview(items) {
+      if (!items.length) return "Không có MAC để xử lý.";
+      return items.map(item => {
+        const type = item.existing ? "HC hiện tại" : "HC mới";
+        const detect = item.existing
+          ? `${item.current_detect_model} (${item.current_detect_version} -> ${item.next_detect_version})`
+          : `version ${item.next_detect_version}`;
+        const verify = item.existing
+          ? `${item.current_verify_model} (${item.current_verify_version} -> ${item.next_verify_version})`
+          : `version ${item.next_verify_version}`;
+        const config = item.existing
+          ? `${item.current_config_version} -> ${item.next_config_version}`
+          : `version ${item.next_config_version}`;
+        return `${item.mac} - ${type}\ndetect: ${detect}\nverify: ${verify}\nconfig: ${config}`;
+      }).join("\n\n");
+    }
+
+    async function previewBulk() {
+      try {
+        const items = await api("/api/hc/bulk-preview", bulkRequest());
+        $("bulk-preview").textContent = formatBulkPreview(items);
+        $("bulk-result").textContent = `Đã kiểm tra ${items.length} MAC.`;
+        setStatus("Danh sách hợp lệ, có thể update.");
+      } catch (e) {
+        $("bulk-result").textContent = "";
+        $("bulk-preview").textContent = e.message;
+        setStatus(e.message);
+      }
+    }
+
+    async function updateBulk() {
+      if (!confirm("Xác nhận update model cho toàn bộ danh sách MAC?")) return;
+      try {
+        const result = await api("/api/hc/bulk-update", bulkRequest());
+        $("bulk-preview").textContent = formatBulkPreview(result.items);
+        $("bulk-result").textContent = result.message;
+        await loadState();
+        setStatus(result.message);
+      } catch (e) {
+        $("bulk-result").textContent = e.message;
+        setStatus(e.message);
       }
     }
 
@@ -1222,6 +1603,7 @@ const HTML: &str = r#"<!doctype html>
       }
     }
 
+    renderBulkMacs();
     loadState().then(() => { if (state.hcs[0]) loadHc(state.hcs[0].dir); else newHc(); });
   </script>
 </body>
