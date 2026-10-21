@@ -5,13 +5,13 @@
     "IOU_RATE=0.8",
     "LD_LIBRARY_PATH=/usr/local/lib/",
     "LUMI_LIFE_CONFIG_ENDPOINT=https://lumilife-config.bizfly.cluster.lumi.biz",
-    "MODEL_PATH=/etc/smarthome/detect_model_v2.lum",
+    "MODEL_PATH=/etc/smarthome/detect_model_v31.lum",
     "RECORD_MAIN_STREAM=true",
-    "SCORE_BASE=0.8",
-    "SCORE_SECURITY=0.9",
-    "SCORE_VERIFY=0.5",
-    "SECURITY_TIME_WINDOW=3",
-    "VERIFY_MODEL_PATH=/etc/smarthome/verify_model_240826.lum",
+    "SCORE_BASE=0.75",
+    "SCORE_SECURITY=0.85",
+    "SCORE_VERIFY=0.8",
+    "SECURITY_TIME_WINDOW=2",
+    "VERIFY_MODEL_PATH=/etc/smarthome/verify_model_v31_211026.lum",
     "VLM_ENDPOINT=https://api-vlm-gateway.bizfly.cluster.lumi.biz/v1/runtime/resource/verify-cloud"
   ]
 }
